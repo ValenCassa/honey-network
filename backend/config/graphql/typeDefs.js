@@ -32,6 +32,19 @@ const typeDefs = gql`
         updated_at: String!
         created_at: String!
         reposted_by: String
+        reply_id: Int
+    }
+
+    type Fav {
+        id: Int!
+        user_id: Int!
+        post_id: Int!
+        faved_at: String!
+    }
+
+    type PostData {
+        favs: Int!
+        reposts: Int!
     }
 
     type Query {
@@ -43,6 +56,9 @@ const typeDefs = gql`
         postFromFollowers: [Post!]
         tweetsProfile(user_id: Int!): [Post!]
         timeline: [Post!]
+        userFavs(user_id: Int!): [Post!]
+        postComments(post_id: Int!): [Post!]
+        postData(post_id: Int!): PostData
     }
 
     type Mutation {
@@ -84,10 +100,20 @@ const typeDefs = gql`
         delRePost(
             post_id: Int!
         ): String
+
+        addComment(
+            reply_id: Int!
+            content: String!
+        ): Post
+
+        delComment(
+            comment_id: Int!
+        ): String
     }
 
     type Subscription {
-        tweetsViewed: [Post]
+        liveFavs: Fav
+        liveUnFav: Fav
     }
 
 `

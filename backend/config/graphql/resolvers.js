@@ -9,6 +9,10 @@ import db from '../../utils/db.js'
 
 const pubsub = new PubSub()
 
+const SUBSCRIPTIONS = {
+    fav: 'POST_FAVED',
+    unFav: 'POST_UNFAVED'
+}
 
 const resolvers = {
     Query: {
@@ -45,6 +49,8 @@ const resolvers = {
 
                 ]
             })
+
+            
 
             const followersData = JSON.parse(JSON.stringify(getFollowers))
 
@@ -109,6 +115,46 @@ const resolvers = {
             `)
 
             return posts[0]
+        },
+        userFavs: async (root, args) => {
+            const userFavs = await models.Post.findAll({
+                include: {
+                    model: models.Fav,
+                    attributes: ['user_id', 'faved_at'],
+                    where: {
+                        user_id: args.user_id
+                    }
+                },
+            })
+
+            return userFavs
+        },
+        postComments: async (root, args) => {
+            const postComments = await models.Post.findAll({
+                where: {
+                    reply_id: args.post_id
+                }
+            })
+
+            return postComments
+        },
+        postData: async (root, args) => {
+            const favsData = await models.Fav.findAll({
+                where: {
+                    post_id: args.post_id
+                }
+            })
+
+            const repostsData = await models.RePost.findAll({
+                where: {
+                    post_id: args.post_id
+                }
+            })
+
+            const favs = JSON.parse(JSON.stringify(favsData)).length
+            const reposts = JSON.parse(JSON.stringify(repostsData)).length
+
+            return { favs, reposts }
         }
     },
 
@@ -253,13 +299,131 @@ const resolvers = {
                     invalidArgs: args
                 })
             }
+        },
+        delRePost: async (root, args, context) => {
+            const currentUser = await context.currentUser()
+
+            if (!currentUser) {
+                throw new AuthenticationError('Not authenticated')
+            }
+
+            try {
+                await models.RePost.destroy({
+                    where: {
+                        user_id: currentUser.id,
+                        post_id: args.post_id
+                    }
+                })
+
+                return 'Removed repost successfully'
+            } catch (error) {
+                throw new UserInputError(error.message)
+            }
+        },
+        fav: async (root, args, context) => {
+            const currentUser = await context.currentUser()
+
+            if (!currentUser) {
+                throw new AuthenticationError('Not authenticated')
+            }
+
+            const exists = await models.Fav.findOne({
+                where: {
+                    [Op.and]: [
+                        { user_id: currentUser.id },
+                        { post_id: args.post_id }
+                    ]
+                }
+            })
+
+            
+            if(exists) {
+                throw new UserInputError('Post already faved')
+            }
+
+            try {
+                const favedPost = await models.Fav.create({ user_id: currentUser.id, post_id: args.post_id, faved_at: new Date() })
+                pubsub.publish(SUBSCRIPTIONS.fav, { liveFavs: favedPost })
+                return 'Faved successfully'
+            } catch (error) {
+                throw new UserInputError(error.message)
+            }
+        },
+        unFav: async (root, args, context) => {
+            const currentUser = await context.currentUser()
+
+            if (!currentUser) {
+                throw new AuthenticationError('Not authenticated')
+            }
+
+            try {
+                const unFavedPost = await models.Fav.findOne({
+                    where: {
+                        user_id: currentUser.id,
+                        post_id: args.post_id
+                    }
+                })
+                
+                pubsub.publish(SUBSCRIPTIONS.unFav, { liveUnFav: unFavedPost })
+
+                await models.Fav.destroy({
+                    where: {
+                        user_id: currentUser.id,
+                        post_id: args.post_id
+                    }
+                })
+
+
+                return 'Removed fav successfully'
+            } catch (error) {
+                throw new UserInputError(error.message)
+            }
+        },
+        addComment: async (root, args, context) => {
+            const currentUser = await context.currentUser()
+
+            if (!currentUser) {
+                throw new AuthenticationError('Not authenticated')
+            }
+
+            try {
+                const comment = await models.Post.create({...args, user_id: currentUser.id })
+
+                return comment
+            } catch (error) {
+                throw new UserInputError(error.message)
+            }
+        },
+        delComment: async (root, args, context) => {
+            const currentUser = await context.currentUser()
+
+            if (!currentUser) {
+                throw new AuthenticationError('Not authenticated')
+            }
+
+            try {
+                await models.Post.destroy({
+                    where: {
+                        user_id: currentUser.id,
+                        reply_id: args.reply_id
+                    }
+                })
+
+                return 'Comment deleted successfully'
+            } catch (error) {
+                throw new UserInputError(error.message)
+            }
         }
-    }
-    /*Subscription: {
-        tweetsViewed: {
-            subscribe: () => pubsub.asyncIterator(['TWEETS_VIEWED'])
+        
+    },
+    Subscription: {
+        liveFavs: {
+            subscribe: () => pubsub.asyncIterator([SUBSCRIPTIONS.fav])
+        },
+        liveUnFav: {
+            subscribe: () => pubsub.asyncIterator([SUBSCRIPTIONS.unFav])
         }
-    } */
+    } 
 }
 
 export default resolvers

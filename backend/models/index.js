@@ -26,11 +26,14 @@ User.belongsToMany(Post, { through: Fav, as: 'favs_list' })
 Post.belongsToMany(User, { through: Fav, as: 'post_favs' })
 User.hasMany(Fav)
 Fav.belongsTo(User)
+Post.hasMany(Fav)
+Fav.belongsTo(Post)
 
 export default {
     User,
     Post,
     Followers,
-    RePost
+    RePost,
+    Fav,
 }
 

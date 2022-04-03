@@ -22,7 +22,13 @@ Post.init({
     },
     updated_at: {
         type: DataTypes.DATE
-    }
+    },
+    reply_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: 'posts', key: 'id' },
+        
+    },
 }, {
     timestamps: true,
     underscored: true,
