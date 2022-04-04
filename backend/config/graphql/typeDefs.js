@@ -20,9 +20,19 @@ const typeDefs = gql`
         admin: Boolean!
     }
 
+    type UserInfo {
+        name: String!
+        username: String!
+    }
+
     type FollowersList {
         followers: [User!]!
         following: [User!]!
+    }
+    
+    type PostData {
+        favs: Int!
+        reposts: Int!
     }
 
     type Post {
@@ -33,6 +43,18 @@ const typeDefs = gql`
         created_at: String!
         reposted_by: String
         reply_id: Int
+        user: UserInfo
+        data: PostData
+    }
+
+    type FavData {
+        post_id: Int!
+        favs: Int!
+    }
+
+    type RepostsData {
+        post_id: Int!
+        reposts: Int!
     }
 
     type Fav {
@@ -41,16 +63,13 @@ const typeDefs = gql`
         post_id: Int!
         faved_at: String!
     }
-
-    type PostData {
-        favs: Int!
-        reposts: Int!
-    }
+    
 
     type Query {
         allTweets: [Post!]!
         findUser(user: String!): User
-        checkUser: User
+        currentUser: User
+        uniquePost(post_id: Int!): Post
         checkUserFollowers(user_id: Int!): FollowersList
         countUserFollowers(user_id: Int!): Followers
         postFromFollowers: [Post!]
@@ -109,11 +128,16 @@ const typeDefs = gql`
         delComment(
             comment_id: Int!
         ): String
+
+        editPost(
+            post_id: Int!
+            content: String!
+        ): Post
     }
 
     type Subscription {
-        liveFavs: Fav
-        liveUnFav: Fav
+        liveFavs: FavData
+        liveReposts: RepostsData
     }
 
 `

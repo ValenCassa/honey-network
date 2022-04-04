@@ -5,18 +5,19 @@ import bcrypt from 'bcrypt'
 import { default as jwt } from 'jsonwebtoken'
 import { Op } from "@sequelize/core"
 import db from '../../utils/db.js'
+import { favSubscription, repostSubscription } from "./utils.js"
+
+const SUBSCRIPTIONS = {
+    favAction: 'FAV_ACTION',
+    repostAction: 'REPOST_ACTION'
+}
 
 
 const pubsub = new PubSub()
 
-const SUBSCRIPTIONS = {
-    fav: 'POST_FAVED',
-    unFav: 'POST_UNFAVED'
-}
-
 const resolvers = {
     Query: {
-        checkUser: async (root, args, context) => {
+        currentUser: async (root, args, context) => {
             const currentUser = context.currentUser()
             return currentUser
         },
@@ -105,7 +106,7 @@ const resolvers = {
         timeline: async (root, args, context) => {
             const currentUser = await context.currentUser()
             const posts = await db.sequelize.query(`
-            SELECT posts.id, content, users.id AS user_id, users.username, created_at, updated_at, s.name AS reposted_by, s.user_id as reposted_id
+            SELECT posts.id, content, users.id AS user_id, users.username, created_at, updated_at, s.name AS reposted_by, s.user_id as reposted_id, reply_id
             FROM posts
             INNER JOIN users ON posts.user_id = users.id
             FULL JOIN (select * from reposts full join users on users.id = reposts.user_id WHERE reposts.user_id = ${currentUser.id} OR EXISTS (SELECT * FROM followers WHERE follower_id = reposts.user_id AND followers.user_id = ${currentUser.id})) s on s.post_id = posts.id
@@ -155,6 +156,22 @@ const resolvers = {
             const reposts = JSON.parse(JSON.stringify(repostsData)).length
 
             return { favs, reposts }
+        },
+        uniquePost: async (root, args) => {
+
+            const postQuery = await db.sequelize.query(`
+            SELECT posts.id, content, created_at, updated_at, user_id, reply_id, favs, username, name, reposts FROM posts
+            FULL JOIN (SELECT COUNT(post_id) AS favs, post_id FROM favs GROUP BY post_id) f ON f.post_id = posts.id
+            INNER JOIN users ON users.id = posts.user_id
+            FULL JOIN (SELECT COUNT(post_id) AS reposts, post_id FROM reposts GROUP BY post_id) r ON r.post_id = posts.id
+            WHERE posts.id = ${args.post_id};
+            `)
+
+            const postData = postQuery[0][0]
+
+            const post = { id: postData.id, content: postData.content, created_at: postData.created_at, updated_at: postData.updated_at, reply_id: postData.reply_id, data: { favs: postData.favs, reposts: postData.reposts }, user: { username: postData.username, name: postData.name } }
+
+            return post
         }
     },
 
@@ -188,7 +205,7 @@ const resolvers = {
             }
 
             try {
-                const post = await models.Post.create({...args, user_id: currentUser.id })
+                const post = await models.Post.create({...args, user_id: currentUser.id, created_at: new Date() })
 
                 return post
 
@@ -292,6 +309,9 @@ const resolvers = {
             
             try {
                 await models.RePost.create({ user_id: currentUser.id, post_id: args.post_id, reposted_at: new Date() })
+
+                const repostData = await repostSubscription({ post_id: args.post_id })
+                pubsub.publish(SUBSCRIPTIONS.repostAction, { liveReposts: repostData })
                 
                 return 'Succefully reposted'
             } catch (error) {
@@ -314,6 +334,9 @@ const resolvers = {
                         post_id: args.post_id
                     }
                 })
+
+                const repostData = await repostSubscription({ post_id: args.post_id })
+                pubsub.publish(SUBSCRIPTIONS.repostAction, { liveReposts: repostData })
 
                 return 'Removed repost successfully'
             } catch (error) {
@@ -342,8 +365,11 @@ const resolvers = {
             }
 
             try {
-                const favedPost = await models.Fav.create({ user_id: currentUser.id, post_id: args.post_id, faved_at: new Date() })
-                pubsub.publish(SUBSCRIPTIONS.fav, { liveFavs: favedPost })
+                await models.Fav.create({ user_id: currentUser.id, post_id: args.post_id, faved_at: new Date() })
+
+                const favsData = await favSubscription({ post_id: args.post_id })
+                pubsub.publish(SUBSCRIPTIONS.favAction, { liveFavs: favsData })
+
                 return 'Faved successfully'
             } catch (error) {
                 throw new UserInputError(error.message)
@@ -357,21 +383,15 @@ const resolvers = {
             }
 
             try {
-                const unFavedPost = await models.Fav.findOne({
-                    where: {
-                        user_id: currentUser.id,
-                        post_id: args.post_id
-                    }
-                })
-                
-                pubsub.publish(SUBSCRIPTIONS.unFav, { liveUnFav: unFavedPost })
-
                 await models.Fav.destroy({
                     where: {
                         user_id: currentUser.id,
                         post_id: args.post_id
                     }
                 })
+
+                const favsData = await favSubscription({ post_id: args.post_id })
+                pubsub.publish(SUBSCRIPTIONS.favAction, { liveFavs: favsData })
 
 
                 return 'Removed fav successfully'
@@ -413,15 +433,39 @@ const resolvers = {
             } catch (error) {
                 throw new UserInputError(error.message)
             }
+        },
+        editPost: async (root, args, context) => {
+            const currentUser = await context.currentUser()
+
+            if (!currentUser) {
+                throw new AuthenticationError('Not authenticated')
+            }
+
+            const post = await models.Post.findByPk(args.post_id)
+
+            if (post.user_id !== currentUser.id) {
+                throw new UserInputError('You are not allowed to do that')
+            }
+
+            try {
+
+                post.content = args.content
+                post.updated_at = new Date()
+                await post.save()
+
+                return post
+            } catch (error) {
+                throw new UserInputError(error.message)
+            }
         }
         
     },
     Subscription: {
         liveFavs: {
-            subscribe: () => pubsub.asyncIterator([SUBSCRIPTIONS.fav])
+            subscribe: () => pubsub.asyncIterator([SUBSCRIPTIONS.favAction])
         },
-        liveUnFav: {
-            subscribe: () => pubsub.asyncIterator([SUBSCRIPTIONS.unFav])
+        liveReposts: {
+            subscribe: () => pubsub.asyncIterator([SUBSCRIPTIONS.repostAction])
         }
     } 
 }

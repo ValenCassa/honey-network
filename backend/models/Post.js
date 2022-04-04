@@ -18,7 +18,8 @@ Post.init({
         references: { model: 'users', key: 'id' }
     },
     created_at: {
-        type: DataTypes.DATE
+        type: DataTypes.DATE,
+        allowNull: false
     },
     updated_at: {
         type: DataTypes.DATE
@@ -30,7 +31,7 @@ Post.init({
         
     },
 }, {
-    timestamps: true,
+    timestamps: false,
     underscored: true,
     sequelize: db.sequelize,
     modelName: 'post'
